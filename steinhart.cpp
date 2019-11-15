@@ -12,8 +12,8 @@
 //Temperature in Kelvin = 1 / {A + B[ln(R)] + C[ln(R)]^3}
 //Temp = 1.0 / (A + (B*Temp) + (C * Temp * Temp * Temp ));
 
-
-float Steinhart::RawToCelcius(uint16_t beta, uint16_t reading) {
+/*
+float Steinhart::rawToCelcius(uint16_t beta, uint16_t reading) {
 
   // If we get zero its likely the ADC is connected to ground
   if (reading > 0) {
@@ -31,3 +31,5 @@ float Steinhart::RawToCelcius(uint16_t beta, uint16_t reading) {
 
   return -273.15;
 }
+
+*/

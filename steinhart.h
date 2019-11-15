@@ -1,3 +1,4 @@
+/*
 #ifndef _STEINHART_H
 #define _STEINHART_H
 
@@ -9,6 +10,7 @@
 
 class Steinhart {
    public:
-      static float RawToCelcius(uint16_t beta, uint16_t reading);
+      static float rawToCelcius(uint16_t beta, uint16_t reading);
 };
 #endif
+*/
