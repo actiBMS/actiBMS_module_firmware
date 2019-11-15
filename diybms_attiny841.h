@@ -25,52 +25,68 @@
 */
 /*
 
-  HARDWARE ABSTRACTION CODE FOR ATTINY841
+  HARDWARE ABSTRACTION CODE FOR ATTINY841 & DIYBMS v5!
 
   PIN MAPPINGS
   Diagram
   https://github.com/SpenceKonde/ATTinyCore/blob/master/avr/extras/ATtiny_x41.md
 
-  PA1 = PIN 12 SERIAL TRANSMIT (TXD0)
-  PA2 = PIN 11 SERIAL RECEIVE (RXD0)
+  PA1 = PIN 12 - SERIAL TRANSMIT (TXD0)
+  PA2 = PIN 11 - SERIAL RECEIVE (RXD0)
 
-  PA3 = DUMP LOAD ENABLE / PIN 10 /  ARDUINO PIN 7/A3 / TOCC2
-  PA4 = ADC4 PIN 9 ARDUINO PIN 6/A4 = ON BOARD TEMP sensor
-  PA5 = SERIAL PORT 1 TXD1 - NOT USED
-  PA6 = GREEN_LED / PIN 7 / ARDUINO PIN 4/A6
-  PA7 = ADC7 = PIN 6 = ARDUINO PIN 3/A7 = 2.048V REFERENCE ENABLE
+  PA3 = PIN 10 - DUMP LOAD ENABLE        / ARDUINO PIN 7/A3 / TOCC2
+  PA4 = PIN 9  - ACTIVE BALANCE ENABLE   / ARDUINO PIN 6/A4
+  PA5 = PIN 8  - ACTIVE BALANCE STATUS   / ARDUINO PIN 5/A4
+  PA6 = PIN 7  - STATUS LED              / ARDUINO PIN 4/A6
+  PA7 = PIN 6  - 2.048V REFERENCE ENABLE / ARDUINO PIN 3/A7
 
-  PB2 = ADC8 PIN 5 ARDUINO PIN 2/A8 = VOLTAGE reading
-  PB0 = ADC11 PIN 2 ARDUINO PIN 0/A11 = REMOTE TEMP sensor
-  PB1 = ADC10 PIN 3 ARDUINO PIN 1/A10 = SPARE INPUT/OUTPUT
+  PB0 = PIN 2  - ON BOARD TEMP sensor    / ADC11 / ARDUINO PIN 0/A11
+  PB1 = PIN 3  - VOLTAGE reading         / ADC10 / ARDUINO PIN 1/A10
+  PB2 = PIN 5  - REMOTE TEMP sensor      / ADC8  / ARDUINO PIN 2/A8
 
   ATTiny841 data sheet
   http://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-8495-8-bit-AVR-Microcontrollers-ATtiny441-ATtiny841_Datasheet.pdf
+
+*/
+
+
+/*
+  enum STATUS_COLOR : uint8_t {
+  LED_GREEN = 0x1,
+  LED_RED = 0x1,
+  LED_BLUE = 0x1,
+  };
 */
 
 #ifndef _DIYBMS_ATTINY841_H // include guard
 #define _DIYBMS_ATTINY841_H
 
 //Show error is not targeting ATTINY841
+
 #if !(defined(__AVR_ATtiny841__))
 #error Written for ATTINY841 chip
 #endif
+
 
 #include <Arduino.h>
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include <avr/wdt.h>
 
+
+#include <tinyNeoPixel.h>
+
+
 #include "diybms_hal.h"
 
 #ifdef DIYBMS_DEBUG
 
 #define DEBUG_PRINT(str) \
-   Serial1.print(__LINE__); \
-   Serial1.print(' '); \
-   Serial1.println(str);
+  Serial1.print(__LINE__); \
+  Serial1.print(' '); \
+  Serial1.println(str);
 #else
-  #define DEBUG_PRINT(str);
+#define DEBUG_PRINT(str);
 #endif
 
 class DiyBMSATTiny841 : public BMSHal {
@@ -92,20 +108,22 @@ class DiyBMSATTiny841 : public BMSHal {
     void referenceVoltageOn();
     void referenceVoltageOff();
 
-    void enableSerial0();
-    void disableSerial0();
+    /*
+        void enableSerial0();
+        void disableSerial0();
+    */
 
-    void enableSerial0TX();
-    void disableSerial0TX();
+    void flushSerial();
 
-    void flushSerial0();
+    void enableSerialTX();
+    void disableSerialTX();
 
     void watchdogOn();
     void watchdogReset();
     void watchdogOff();
 
-    void ADCBegin(uint8_t channel);
-    uint16_t ADCRead();
+    uint16_t ADCBegin(uint8_t channel, bool more);
+    //uint16_t ADCRead();
 
     void timer2Begin();
     void timer2End();
@@ -113,17 +131,19 @@ class DiyBMSATTiny841 : public BMSHal {
 
     void sleep();
 
+    void enableSFD();
+
   private:
+    tinyNeoPixel* pixels;
 
-    void enableSerial1();
-    void disableSerial1();
+    /*
+      void enableSerial1();
+      void disableSerial1();
+    */
 
-    void EnablePinChangeInterrupt();
-    void DisablePinChangeInterrupt();
-
-    void SelectCellVoltageChannel();
-    void SelectInternalTemperatureChannel();
-    void SelectExternalTemperatureChannel();
+    // PIN CHANGE INTERRUPT
+    void enablePCI();
+    void disablePCI();
 };
 
 #endif
