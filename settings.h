@@ -29,8 +29,8 @@ class Settings {
     Settings(uint16_t start_address);
     Settings(uint16_t start_address, size_t max_length);
 
-    bool writeConfig(byte * settings, size_t length);
-    bool readConfig(byte * settings, size_t length);
+    bool writeConfig(byte* settings, size_t length);
+    bool readConfig(byte* settings, size_t length);
 
   private:
     size_t _max_length;    

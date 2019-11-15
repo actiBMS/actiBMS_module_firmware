@@ -16,7 +16,7 @@ Settings::Settings(uint16_t start_address, size_t max_length) {
   _max_length = max_length;
 }
 
-bool Settings::writeConfig(byte * settings, size_t length) {
+bool Settings::writeConfig(byte* settings, size_t length) {
   uint16_t address;
   uint16_t checksum;
 
@@ -37,7 +37,7 @@ bool Settings::writeConfig(byte * settings, size_t length) {
   return true;
 }
 
-bool Settings::readConfig(byte * settings, size_t length) {
+bool Settings::readConfig(byte* settings, size_t length) {
   uint16_t address;
   uint16_t checksum, existingChecksum;
 
