@@ -23,6 +23,7 @@
   No additional restrictions — You may not apply legal terms or technological measures
   that legally restrict others from doing anything the license permits.
 */
+
 /*
   HARDWARE ABSTRACTION CODE
 */
@@ -30,17 +31,12 @@
 #ifndef _DIYBMS_HAL_H
 #define _DIYBMS_HAL_H
 
-#define ADC_CELL_VOLTAGE 0
-#define ADC_CHIP_TEMP 1
-#define ADC_INTERNAL_TEMP 2
-#define ADC_EXTERNAL_TEMP 3
-
 #include <Arduino.h>
 
-enum STATUS : uint8_t {
-  LED_GREEN = 0x1,
-  LED_RED = 0x1,
-  LED_BLUE = 0x1,
+enum ADC_CAHNNEL : uint8_t {
+  ADC_CELL_VOLTAGE,
+  ADC_INTERNAL_TEMP,
+  ADC_EXTERNAL_TEMP
 };
 
 /*
@@ -61,20 +57,17 @@ class BMSHal {
     virtual void referenceVoltageOn();
     virtual void referenceVoltageOff();
 
-    virtual void enableSerial0();
-    virtual void disableSerial0();
+    virtual void flushSerial();
 
-    virtual void enableSerial0TX();
-    virtual void disableSerial0TX();
-
-    virtual void flushSerial0();
+    virtual void enableSerialTX();
+    virtual void disableSerialTX();
 
     virtual void watchdogOn();
     virtual void watchdogReset();
     virtual void watchdogOff();
 
-    virtual void ADCBegin(uint8_t channel);
-    virtual uint16_t ADCRead();
+    virtual uint16_t ADCBegin(uint8_t channel, bool more);
+    //virtual uint16_t ADCRead();
 
     virtual void timer2Begin();
     virtual void timer2End();
