@@ -144,7 +144,7 @@ bool DiyBMS::update() {
   }
 
   // Our cell voltage is OVER the setpoint limit, start draining cell using load bypass resistor
-  if (_cell_voltage > _config.bypass_threshold_voltage) {
+  if (_config.enable_bypass && _cell_voltage > _config.bypass_threshold_voltage) {
 
     //We have just entered the bypass code
     if (!_bypass_count_down) {
@@ -161,6 +161,22 @@ bool DiyBMS::update() {
       _bypass_count_down = _config.bypass_duration_count;
       _bypass_count_finished = 0;
     }
+  }
+
+  if (_config.enable_balancing) {
+
+    // TODO - Move to HAL
+    if (digitalRead(A0)) {
+      _status |= STATUS::STAT_BALANCING;
+    }
+
+    if (_cell_voltage > _config.balancing_threshold_voltage
+        && (_config.enable_balancing_onbypass || !(_status & STATUS::STAT_BYPASSING))) {
+      _hardware->activeBalanceOff();
+    } else {
+      _hardware->activeBalanceOff();
+    }
+
   }
 
   Serial.printf(F("_bypass_count_down: %d\n"), _bypass_count_down);
@@ -326,6 +342,15 @@ void DiyBMS::loadDefaultConfig() {
 
   // Wait 200 iterations before next bypass mode
   _config.bypass_cooldown_count = 200;
+
+  // Enable Active Balancing
+  _config.enable_balancing = true;
+
+  // Enable Active Balancing
+  _config.enable_balancing_onbypass = false;
+
+  // Active Balancing Voltage Threshold (millivolt)
+  _config.balancing_threshold_voltage = 3800;
 
   // About 2210mV seems about right
   _config.volt_offset = 2210;
