@@ -33,6 +33,18 @@
 
 #include <Arduino.h>
 
+enum LED_STATUS : uint8_t
+{
+  LED_PROVISIONED = 0x01,
+  LED_IDENTIFY = 0x02,
+  LED_BALANCING = 0x04,
+  LED_BYPASSING = 0x08,
+  LED_AWAKED = 0x10,
+  LED_OVER_TEMP = 0x20,
+  LED_UNDER_TEMP = 0x40,
+  LED_FAULT = 0x80
+};
+
 enum ADC_CAHNNEL : uint8_t {
   ADC_CELL_VOLTAGE,
   ADC_INTERNAL_TEMP,
@@ -57,22 +69,22 @@ class BMSHal {
     virtual void referenceVoltageOn();
     virtual void referenceVoltageOff();
 
-    virtual void flushSerial();
-
     virtual void enableSerialTX();
     virtual void disableSerialTX();
+    virtual void flushSerial();
 
     virtual void watchdogOn();
-    virtual void watchdogReset();
     virtual void watchdogOff();
+    virtual void watchdogReset();    
+    virtual void watchdogReboot();
 
     virtual uint16_t ADCBegin(uint8_t channel, bool more);
-    //virtual uint16_t ADCRead();
 
-    virtual void timer2Begin();
-    virtual void timer2End();
-    virtual void timer2Set(uint16_t value);
+    virtual void pwmBegin();
+    virtual void pwmEnd();
+    virtual void pwmSet(uint16_t value);
 
+    virtual void display(uint8_t state);
     virtual void sleep();
 };
 

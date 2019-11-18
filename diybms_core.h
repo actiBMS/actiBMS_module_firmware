@@ -27,7 +27,8 @@
 #ifndef _DIYBMS_CORE_H
 #define _DIYBMS_CORE_H
 
-#include <tinyNeoPixel.h>
+#define WDT_REBOOT_CNT 3
+
 #include <FastPID.h>
 
 #include "diybms_hal.h"
@@ -39,130 +40,173 @@
 //This is where the data begins in EEPROM
 #define EEPROM_CONFIG_ADDRESS 0x10
 
-/*
-   Configuration
+#define THERMISTOR_TEMPERATURE 25
+#define THERMISTOR_NOMINAL 47000
+#define RESISTOR_SERIES 47000
 
-   All the settings that we store into the EEPROM
+/*
+   Statuses
+
+   All the statuses that the cell module can have
 */
 
+enum STATUS : uint8_t
+{
+  STAT_PROVISIONED = 0x01,
+  STAT_IDENTIFY = 0x02,
+  STAT_BALANCING = 0x04,
+  STAT_BYPASSING = 0x08,
+  STAT_AWAKED = 0x10,
+  STAT_OVER_TEMP = 0x20,
+  STAT_UNDER_TEMP = 0x40,
+  STAT_FAULT = 0x80
+};
+
+/*
+   Configuration STRUCT
+   All the settings that we store into the EEPROM
+*/
 struct config_t {
 
   // Communication Addresses
   uint8_t bank_id;
   uint8_t cell_id;
 
-  // Bypass Over Temperature Threshold
-  uint8_t bypass_threshold_temperature;
+  // Cell Over Temperature Threshold
+  uint8_t cell_threshold_over_temperature;
+
+  // Cell Under Temperature Threshold
+  uint8_t cell_threshold_under_temperature;
+
+  // Enable Passive Balancing
+  uint8_t enable_bypass;
 
   // Bypass Over Temperature Threshold
+  uint8_t bypass_threshold_over_temperature;
+
+  // Bypass Temperature Setpoint
+  uint8_t bypass_temperature_setpoint;
+
+  // Bypass Voltage Threshold (millivolt)
   uint16_t bypass_threshold_voltage;
 
-  // Resistance of bypass load
-  float bypass_resistance;
+  // Resistance of bypass load (milliohm) normally
+  uint16_t bypass_resistance;
 
-  // Voltage Calibration
-  float volt_offset;
+  // # of iterations in bypass mode before another check
+  uint16_t bypass_duration_count;
 
-  // Reference voltage (millivolt) normally 2.00mV
-  float volt_reference;
+  // # of iterations to wait for before next bypass
+  uint16_t bypass_cooldown_count;
 
-  // Internal Thermistor settings
+  // Enable Active Balancing
+  uint8_t enable_balancing;
+
+    // Enable Active Balancing
+  uint8_t enable_balancing_onbypass;
+
+  // Active Balancing Voltage Threshold (millivolt)
+  uint16_t balancing_threshold_voltage;
+
+  // Voltage Calibration (millivolt)
+  uint16_t volt_offset;
+
+  // Reference voltage (millivolt) normally 2mV
+  uint16_t volt_reference;
+
+  // Internal Thermistor Beta Coeff
   uint16_t t_internal_beta;
 
-  // External Thermistor settings
+  // External Thermistor Beta Coeff
   uint16_t t_external_beta;
 
 } __attribute__((packed));
 
 class DiyBMS {
   public:
-    DiyBMS(BMSHal *hardware) {
-      _hardware = hardware;
-
-      _settings = new Settings(EEPROM_CONFIG_ADDRESS);
-
-      // Check if setup routine needs to be run
-      if (!load()) {
-        loadDefault();
-        store();
-      }
-
-      pixels = tinyNeoPixel(0, A6, NEO_GRB + NEO_KHZ800);
-
-      //3Hz rate - number of times we call this code in Loop
-      pid = FastPID (150.0, 2.5, 5, 3, 16, false);
-    }
-
-    void update();
-
-    uint16_t incrementWatchdogCounter() {
-      return ++watchdog_counter;
-    }
-
-    uint16_t cellVoltage();
-    float chipTemperature();
-    float onboardTemperature();
-    float externalTemperature();
-
-    void adcRequest(uint8_t value);
-    uint16_t adcRaw();
-
-    // Configuration Handler
-    uint8_t setAddrBank(uint8_t value, bool store);
-    uint8_t getAddrBank();
-
-    uint8_t setAddrCell(uint8_t value, bool store);
-    uint8_t getAddrCell();
-
-    uint8_t setBypassTemp(uint8_t value, bool store);
-    uint8_t getBypassTemp();
-    
-    uint16_t setBypassVoltage( uint16_t value, bool store);
-    uint16_t getBypassVoltage();
-    
-    uint16_t setTempIntBeta( uint16_t value, bool store);
-    uint16_t getTempIntBeta();
-
-    uint16_t setTempExtBeta( uint16_t value, bool store);
-    uint16_t getTempExtBeta();
-    
-    float setBypassResistance(float value, bool store);
-    float getBypassResistance();
-    
-    float setVoltOffset(float value, bool store);
-    float getVoltOffset();
-    
-    float setVoltReference(float value, bool store);
-    float getVoltReference();
-
-    bool restoreFactory();
-    bool store();
-    bool load();
-
-  private:
-    Settings * _settings;
-    BMSHal *_hardware;
     volatile struct config_t _config;
 
-    tinyNeoPixel pixels;
-    FastPID pid;    
+    DiyBMS(BMSHal *hardware) {
+      _hardware = hardware;
+      _settings = new Settings(EEPROM_CONFIG_ADDRESS);
 
-    volatile bool _bypass_active;
-    volatile bool _identify_active;
+      //3Hz rate - number of times we call this code in Loop
+      _pid = new FastPID (150.0, 2.5, 5, 3, 16, false);
+    }
 
-    volatile float cell_voltage;
-    volatile float chip_temperature;
-    volatile float onboard_temperature;
-    volatile float external_temperature;
+    bool begin();
+    bool update();
+    void onWakeup();
 
-    volatile uint16_t watchdog_counter = 0;
-    volatile uint16_t bypass_count_down = 0;
-    volatile uint16_t bypass_count_finished = 0;
+    uint16_t isrWatchdog() {
+      _watchdog_isr = true;
+
+      if (WDT_REBOOT_CNT > 0 && _watchdog_counter >= WDT_REBOOT_CNT) {
+        _hardware->watchdogReboot();
+      }
+
+      _hardware->watchdogReset();
+
+      return ++_watchdog_counter;
+    }
+
+    uint16_t isrSerialRX() {
+      _serial_isr = true;
+    }
+
+    uint16_t isrPCI() {
+      _pci_isr = true;
+    }
+
+    uint8_t getCellStatus();
+
+    // Return Cell Voltage in mV
+    uint16_t getCellVoltage();
+
+    // Return Temperatures in deciCelsius
+    int getChipTemperature();
+    int getOnboardTemperature();
+    int getExternalTemperature();
+
+    // Request and return a RAW ADC data
+    uint16_t adcRawRequest(uint8_t channel, bool more);
+
+    // Enable or Disable identify STATUS
+    void setIdentify(bool value);
+    bool getIdentify();
+
+    // Configuration Handler
+    bool restoreFactoryConfig();
+    bool storeConfig();
+    bool loadConfig();
+
+  private:
+    Settings* _settings;
+    BMSHal* _hardware;
+    FastPID* _pid;
+
+    volatile uint8_t _status;
+
+    volatile uint16_t _cell_voltage;
+
+    volatile int _chip_temperature;
+    volatile int _onboard_temperature;
+    volatile int _external_temperature;
+
+    volatile bool _watchdog_isr = false;
+    volatile bool _serial_isr = false;
+    volatile bool _pci_isr = false;
+
+    volatile uint16_t _watchdog_counter = 0;
+
+    volatile uint16_t _bypass_count_down = 0;
+    volatile uint16_t _bypass_count_finished = 0;
 
     bool checkBypass();
     bool checkBypassOverheat();
-    void loadDefault();
 
+    void adcAcquireData(uint8_t channel, bool more);
+    void loadDefaultConfig();
 };
 
 #endif

@@ -26,361 +26,312 @@
 
 #include "diybms_core.h"
 
-void DiyBMS::update() {
+bool DiyBMS::begin() {
+  // Check if setup routine needs to be run
+  if (!loadConfig()) {
+    loadDefaultConfig();
+    storeConfig();
+  }
 
-  //This loop runs around 3 times per second when the module is in bypass
-  _hardware->watchdogReset();
+  //The TIMER2 can vary between 0 and 10,000
+  _pid->setOutputRange(0, 10000);
 
-  /*if (PP.identifyModule > 0) {
-    hardware.GreenLedOn();
-    PP.identifyModule--;
+  if (_pid->err()) {
+    _status |= STAT_FAULT;
 
-    if (PP.identifyModule == 0) {
-      hardware.GreenLedOff();
+    return false;
+  }
+
+  return true;
+}
+
+//This should runs around 3 times per second when the module is in bypass mode
+bool DiyBMS::update() {
+  int cell_temperature;
+
+  int cell_threshold_over_temperature = ((int)(_config.cell_threshold_over_temperature) * 10);
+  int cell_threshold_under_temperature = ((int)(_config.cell_threshold_under_temperature) * 10);
+
+  int bypass_temperature_setpoint = ((int)(_config.bypass_temperature_setpoint) * 10);
+  int bypass_threshold_over_temperature = ((int)(_config.bypass_threshold_over_temperature) * 10);
+
+  // Clear STATUS::STAT_AWAKED flag;
+  _status &= ~STATUS::STAT_AWAKED;
+
+  // We always take a voltage and temperature reading on every loop cycle to check if we need to go into bypass
+  // this is also triggered by the watchdog should comms fail or the module is running standalone
+  // Probably over kill to do it this frequently
+
+  // Read Cell voltage
+  adcAcquireData(ADC_CELL_VOLTAGE, true);
+
+  // Onboard temperature
+  adcAcquireData(ADC_INTERNAL_TEMP, true);
+
+  // External temperature, last measurement!
+  adcAcquireData(ADC_EXTERNAL_TEMP, false);
+
+  _cell_voltage = 3800;
+  _onboard_temperature = 267;
+  _external_temperature = 397;
+
+  if (_external_temperature == -2732) {
+    cell_temperature = _onboard_temperature;
+  } else {
+    cell_temperature = _external_temperature;
+  }
+
+  Serial.printf(F("Cell Voltage: %dmV\n"), _cell_voltage);
+  Serial.printf(F("Cell Temperature: %d°C\n"), cell_temperature);
+  Serial.printf(F("Cell Voltage Bypass: %dmV\n"), _config.bypass_threshold_voltage);
+  Serial.printf(F("Cell Temperature Threshold Over: %d°C\n"), cell_threshold_over_temperature);
+  Serial.printf(F("Cell Temperature Threshold Under: %d°C\n"), cell_threshold_under_temperature);
+
+  Serial.printf(F("Board Temperature: %d°C\n"), _onboard_temperature);
+  Serial.printf(F("Board Temperature Setpoint: %d°C\n"), bypass_temperature_setpoint);
+  Serial.printf(F("Board Temperature Threshold Over: %d°C\n"), bypass_threshold_over_temperature);
+
+  Serial.println();
+
+  if (cell_temperature > cell_threshold_over_temperature) {
+    _status |= STATUS::STAT_OVER_TEMP;
+  } else {
+    _status &= ~STATUS::STAT_OVER_TEMP;
+  }
+
+  if (cell_temperature < cell_threshold_under_temperature ) {
+    _status |= STATUS::STAT_UNDER_TEMP;
+  } else {
+    _status &= ~STATUS::STAT_UNDER_TEMP;
+  }
+
+  if (_bypass_count_down > 0) {
+    // Compare the real temperature against max setpoint - We want the PID to keep it stable
+    uint16_t output = _pid->step(bypass_temperature_setpoint, _onboard_temperature);
+    _hardware->pwmSet(output);
+
+    Serial.printf(F("Board Bypass Duty: %d%\n"), output / 100);
+    Serial.println();
+
+    _bypass_count_down--;
+
+    // Switch everything off for this cycle
+    if (_bypass_count_down == 0 || _onboard_temperature > bypass_threshold_over_temperature) {
+
+      _status &= ~STATUS::STAT_BYPASSING;
+
+      if (_onboard_temperature > bypass_threshold_over_temperature) {
+        _status |= STATUS::STAT_OVER_TEMP;
+      } else {
+        _status &= ~STATUS::STAT_OVER_TEMP;
+      }
+
+      _hardware->pwmEnd();
+
+      // Switch Load off
+      _hardware->dumpLoadOff();
+
+      // On the next iteration of loop, don't sleep so we are forced to take another
+      // cell voltage reading without the bypass being enabled, and we can then
+      // evaludate if we need to stay in bypass mode, we do this a few times
+      // as the cell has a tendancy to float back up in voltage once load resistor is removed
+      _bypass_count_finished = _config.bypass_cooldown_count;
     }
-    }*/
+  }
 
-  /*if (!PP.WeAreInBypass && bypassHasJustFinished == 0) {
-    //We don't sleep if we are in bypass mode or just after completing bypass
-    hardware.EnableStartFrameDetection();
+  if (_bypass_count_finished > 0) {
+    _bypass_count_finished--;
+  }
 
-    //Program stops here until woken by watchdog or pin change interrupt
-    hardware.Sleep();
-    }*/
+  // Our cell voltage is OVER the setpoint limit, start draining cell using load bypass resistor
+  if (_cell_voltage > _config.bypass_threshold_voltage) {
+
+    //We have just entered the bypass code
+    if (!_bypass_count_down) {
+
+      Serial.printf(F("Board Bypass STARTED!\n"));
+      Serial.println();
+
+      _status |= STATUS::STAT_BYPASSING;
+
+      // Start timer2 with zero value
+      _hardware->pwmBegin();
+
+      //This controls how many cycles of loop() we make before re-checking the situation
+      _bypass_count_down = _config.bypass_duration_count;
+      _bypass_count_finished = 0;
+    }
+  }
+
+  Serial.printf(F("_bypass_count_down: %d\n"), _bypass_count_down);
+  Serial.printf(F("_bypass_count_finished: %d\n"), _bypass_count_finished);
+
+  // Notify Hardware of the current state
+  _hardware->display(_status);
+
+  if (_serial_isr) {
+    _serial_isr = false;
+
+    // Wait for the frame to arrive - This depends on frame size!
+    // Our Frame is 24 bytes + 2 Byte COBS Frame delimiter for a total 26 byte per frame
+    delay(150);
+
+    return false;
+  }
+
+  // We don't sleep if we are in bypass mode or just after completing bypass
+  return !_bypass_count_down && !_bypass_count_finished;
+}
+
+void DiyBMS::onWakeup() {
+  Serial.printf(F("We are awake....\n"));
 
   //We are awake....
 
-  /*if (wdt_triggered) {
-    //Flash green LED twice after a watchdog wake up
-    hardware.double_tap_green_led();
-    }*/
+  if (!(_watchdog_isr || _pci_isr)) {
+    _serial_isr = true;
+  }
 
-  //We always take a voltage and temperature reading on every loop cycle to check if we need to go into bypass
-  //this is also triggered by the watchdog should comms fail or the module is running standalone
-  //Probably over kill to do it this frequently
-  /*hardware.ReferenceVoltageOn();
+  // Process current state
+  if (_watchdog_isr || _serial_isr || _pci_isr) {
 
-    //allow 2.048V to stabalize
-    delay(10);
-
-    PP.TakeAnAnalogueReading(ADC_CELL_VOLTAGE);
-    //Internal temperature
-    PP.TakeAnAnalogueReading(ADC_INTERNAL_TEMP);
-    //External temperature
-    PP.TakeAnAnalogueReading(ADC_EXTERNAL_TEMP);
-
-    hardware.ReferenceVoltageOff();
-
-    if (PP.BypassCheck()) {
-    //Our cell voltage is OVER the setpoint limit, start draining cell using load bypass resistor
-
-    if (!PP.WeAreInBypass) {
-      //We have just entered the bypass code
-
-      //The TIMER2 can vary between 0 and 10,000
-      myPID.setOutputRange(0, 10000);
-
-      //Start timer2 with zero value
-      hardware.StartTimer2();
-
-      PP.WeAreInBypass = true;
-
-      //This controls how many cycles of loop() we make before re-checking the situation
-      bypassCountDown = 200;
-    }
+    if (_watchdog_isr) {
+      Serial.printf(F("_watchdog_isr\n"));
     }
 
-    if (bypassCountDown > 0) {
-    //Compare the real temperature against max setpoint
-    //We want the PID to keep at this temperature
-    //int setpoint = ;
-    //int feedback =
-    uint16_t output = myPID.step(myConfig.BypassOverTempShutdown, PP.InternalTemperature());
-
-    hardware.SetTimer2Value(output);
-
-    bypassCountDown--;
-
-    if (bypassCountDown == 0) {
-      //Switch everything off for this cycle
-
-      PP.WeAreInBypass = false;
-
-      //myPID.clear();
-      hardware.StopTimer2();
-
-      //switch off
-      hardware.DumpLoadOff();
-
-      //On the next iteration of loop, don't sleep so we are forced to take another
-      //cell voltage reading without the bypass being enabled, and we can then
-      //evaludate if we need to stay in bypass mode, we do this a few times
-      //as the cell has a tendancy to float back up in voltage once load resistor is removed
-      bypassHasJustFinished = 200;
-    }
+    if (_serial_isr) {
+      Serial.printf(F("_serial_isr\n"));
     }
 
-    /*if (wdt_triggered) {
-    //We got here because the watchdog (after 8 seconds) went off - we didnt receive a packet of data
-    wdt_triggered = false;
-    } else {
-    //Loop here processing any packets then go back to sleep
-
-    //NOTE this loop size is dependant on the size of the packet buffer (34 bytes)
-    //     too small a loop will prevent anything being processed as we go back to Sleep
-    //     before packet is received correctly
-    for (size_t i = 0; i < 15; i++) {
-      //Allow data to be received in buffer
-      delay(10);
-
-      // Call update to receive, decode and process incoming packets.
-      myPacketSerial.update();
+    if (_pci_isr) {
+      Serial.printf(F("_pci_isr\n"));
     }
-    }
-  */
-  /*
-    if (bypassHasJustFinished > 0) {
-      bypassHasJustFinished--;
-    }*/
+
+    Serial.flush();
+
+    _status |= STATUS::STAT_AWAKED;
+
+    // Notify State to hardware
+    _hardware->display(_status);
+
+    _watchdog_isr = false;
+  }
 }
 
-/*
-   //Read cell voltage and return millivolt reading (16 bit unsigned)
-  uint16_t PacketProcessor::CellVoltage() {
-  //TODO: Get rid of the need for float variables?
-  float v = ((float) raw_adc_voltage * _config->mVPerADC) * _config->Calibration;
+uint8_t DiyBMS::getCellStatus() {
+  return _status;
+}
 
-  return (uint16_t) v;
+uint16_t DiyBMS::getCellVoltage() {
+  return _cell_voltage;
+}
+
+int DiyBMS::getOnboardTemperature() {
+  return _onboard_temperature;
+}
+
+int DiyBMS::getExternalTemperature() {
+  return _external_temperature;
+}
+
+uint16_t DiyBMS::adcRawRequest(uint8_t channel, bool more) {
+  _hardware->ADCBegin(channel, more);
+}
+
+void DiyBMS::setIdentify(bool value) {
+  if (value) {
+    _status |= STAT_IDENTIFY;
+  } else {
+    _status &= ~STAT_IDENTIFY;
   }
 
-  //Returns the last RAW ADC value 0-1023
-  uint16_t PacketProcessor::RawADCValue() {
-  return raw_adc_voltage;
-  }
-*/
+  _hardware->display(_status);
+}
 
+bool DiyBMS::getIdentify() {
+  return (_status & STAT_IDENTIFY) > 0;
+}
 
+// Private STUFF
+void DiyBMS::adcAcquireData(uint8_t channel, bool more) {
+  uint16_t raw_data = adcRawRequest(channel, more);
 
-
-
-/*uint16_t PacketProcessor::TemperatureMeasurement() {
-  return (TemperatureToByte(Steinhart::ThermistorToCelcius(_config->Internal_BCoefficient, onboard_temperature)) << 8) +
-         TemperatureToByte(Steinhart::ThermistorToCelcius(_config->External_BCoefficient, external_temperature));
-  }*/
-
-
-/*
-
-
-  //Start an ADC reading via Interrupt
-  void PacketProcessor::TakeAnAnalogueReading(uint8_t mode) {
-  adcmode = mode;
-
-  switch (adcmode) {
-    case ADC_CELL_VOLTAGE:
+  switch (channel) {
+    case ADC_CAHNNEL::ADC_CELL_VOLTAGE:
       {
-        _hardware-> SelectCellVoltageChannel();
+        _cell_voltage = (raw_data * _config.volt_reference) + _config.volt_offset;
         break;
       }
-    case ADC_INTERNAL_TEMP:
+    case ADC_CAHNNEL::ADC_INTERNAL_TEMP:
       {
-        _hardware-> SelectInternalTemperatureChannel();
+        _onboard_temperature = round(Steinhart::rawToCelcius(_config.t_internal_beta, raw_data) * 10);
         break;
       }
-    case ADC_EXTERNAL_TEMP:
+    case ADC_CAHNNEL::ADC_EXTERNAL_TEMP:
       {
-        _hardware-> SelectExternalTemperatureChannel();
+        // Temperatures are stored in deciCelsius
+        _external_temperature = round(Steinhart::rawToCelcius(_config.t_external_beta, raw_data) * 10);
         break;
       }
+
     default:
       //Avoid taking a reading if we get to here
       return;
   }
-
-  _hardware-> BeginADCReading();
-  }
-
-*/
-/*
-
-   //Records an ADC reading after the interrupt has finished
-  void PacketProcessor::ADCReading(uint16_t value) {
-  switch (adcmode) {
-   case ADC_CELL_VOLTAGE:
-     {
-       //UpdateRingBuffer(value);
-       raw_adc_voltage = value;
-       break;
-     }
-   case ADC_INTERNAL_TEMP:
-     {
-       onboard_temperature = value;
-       break;
-     }
-   case ADC_EXTERNAL_TEMP:
-     {
-       external_temperature = value;
-       break;
-     }
-  }
-  }
-
-*/
-
-
-
-/*
-  // Returns an integer byte indicating the internal thermistor temperature in degrees C
-  // uses basic B Coefficient Steinhart calculaton to give rough approximation in temperature
-  /*int8_t PacketProcessor::InternalTemperature() {
-  return round(Steinhart::ThermistorToCelcius(_config->  Internal_BCoefficient, onboard_temperature));
-  }*/
-
-//Returns TRUE if the internal thermistor is hotter than the required setting
-bool DiyBMS::checkBypassOverheat() {
-  return (onboard_temperature > _config.bypass_threshold_temperature);
-}
-
-//Returns TRUE if the cell voltage is greater than the required setting
-bool DiyBMS::checkBypass() {
-  return (cell_voltage > _config.bypass_threshold_voltage);
 }
 
 // Configuration Handler
-
-uint8_t DiyBMS::setAddrBank(uint8_t value, bool store) {
-  uint8_t old_value = _config.bank_id;
-  _config.bank_id = value;
-
-  return old_value;
+bool DiyBMS::restoreFactoryConfig() {
+  loadDefaultConfig();
+  return storeConfig();
 }
 
-uint8_t DiyBMS::getAddrBank() {
-  return _config.bank_id;
-}
+bool DiyBMS::storeConfig() {
 
-uint8_t DiyBMS::setAddrCell(uint8_t value, bool store) {
-  uint8_t old_value = _config.cell_id;
-  _config.cell_id = value;
+  _hardware->display(_status | STAT_PROVISIONED);
 
-  return old_value;
-}
-
-uint8_t DiyBMS::getAddrCell() {
-  return _config.cell_id;
-}
-
-uint8_t DiyBMS::setBypassTemp(uint8_t value, bool store) {
-  uint8_t old_value = _config.bypass_threshold_temperature;
-  _config.bypass_threshold_temperature = value;
-
-  return old_value;
-}
-
-uint8_t DiyBMS::getBypassTemp() {
-  return _config.bypass_threshold_temperature;
-}
-
-uint16_t DiyBMS::setBypassVoltage( uint16_t value, bool store) {
-  uint16_t old_value = _config.bypass_threshold_voltage;
-  _config.bypass_threshold_voltage = value;
-
-  return old_value;
-}
-
-uint16_t DiyBMS::getBypassVoltage() {
-  return _config.bypass_threshold_voltage;
-}
-
-uint16_t DiyBMS::setTempIntBeta( uint16_t value, bool store) {
-  uint16_t old_value = _config.t_internal_beta;
-  _config.t_internal_beta = value;
-
-  return old_value;
-}
-
-uint16_t DiyBMS::getTempIntBeta() {
-  return _config.t_internal_beta;
-}
-
-uint16_t DiyBMS::setTempExtBeta( uint16_t value, bool store) {
-  uint16_t old_value = _config.t_external_beta;
-  _config.t_external_beta = value;
-
-  return old_value;
-}
-
-uint16_t DiyBMS::getTempExtBeta() {
-  return _config.t_external_beta;
-}
-
-float DiyBMS::setBypassResistance(float value, bool store) {
-  float old_value = _config.bypass_resistance;
-  _config.bypass_resistance = value;
-
-  return old_value;
-}
-
-float DiyBMS::getBypassResistance() {
-  return _config.bypass_resistance;
-}
-
-float DiyBMS::setVoltOffset(float value, bool store) {
-  float old_value = _config.volt_offset;
-  _config.volt_offset = value;
-
-  return old_value;
-}
-
-float DiyBMS::getVoltOffset() {
-  return _config.volt_offset;
-}
-
-float DiyBMS::setVoltReference(float value, bool store) {
-  float old_value = _config.volt_reference;
-  _config.volt_reference = value;
-
-  return old_value;
-}
-
-float DiyBMS::getVoltReference() {
-  return _config.volt_reference;
-}
-
-bool DiyBMS::restoreFactory() {
-  loadDefault();
-  return store();
-}
-
-bool DiyBMS::store() {
   return _settings->writeConfig((byte *) &_config, sizeof(config_t));
 }
 
-bool DiyBMS::load() {
+bool DiyBMS::loadConfig() {
   return _settings->readConfig((byte *) &_config, sizeof(config_t));
 }
 
 // Private:
-void DiyBMS::loadDefault() {
+void DiyBMS::loadDefaultConfig() {
   // Communication Addresses
   _config.bank_id = 0xFF;
   _config.cell_id = 0xFF;
 
-  // Bypass
-  // Stop running bypass if temperature over 70 degrees C
-  _config.bypass_threshold_temperature = 70;
+  // Stop if cell temperature over 70 degrees C
+  _config.cell_threshold_over_temperature = 70;
 
-  //Start bypass at 4.1 volt
+  // Stop if cell temperature below 2 degrees C
+  _config.cell_threshold_under_temperature = 2;
+
+  // Self regulate bypass at 70 degrees C
+  _config.bypass_threshold_over_temperature = 80;
+
+  // Self regulate bypass at 70 degrees C
+  _config.bypass_temperature_setpoint = 70;
+
+  // Start bypass at 4100 mV
   _config.bypass_threshold_voltage = 4100;
 
-  // Resistor network
-  _config.bypass_resistance =  2.6667;
+  // Resistor network 2.6667 Ohm
+  _config.bypass_resistance = 2667;
 
-  //About 2.2100 seems about right
-  _config.volt_offset = 2.21000;
+  // Wait 200 iterations before re-checking the situation
+  _config.bypass_duration_count = 200;
 
-  //2mV per ADC resolution
-  _config.volt_reference = 2.0; //2048.0/1024.0;
+  // Wait 200 iterations before next bypass mode
+  _config.bypass_cooldown_count = 200;
+
+  // About 2210mV seems about right
+  _config.volt_offset = 2210;
+
+  // 2mV per ADC resolution
+  _config.volt_reference = 2; //2048mV/1024;
 
   // Resistance @ 25℃ = 47k, B Constant 4150, 0.20mA max current
   //Using https://www.thinksrs.com/downloads/programs/therm%20calc/ntccalibrator/ntccalculator.html
