@@ -396,6 +396,8 @@ void DiyBMSArduino::display(uint8_t state) {
     processed = pixels->Color(0, 255, 255, 0);
   }
 
+  // TODO - Case BALANCING + BYPASSING
+
   if (state & LED_OVER_TEMP) {
     processed = pixels->Color(0, 255, 100, 0);
   }

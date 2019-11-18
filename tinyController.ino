@@ -26,6 +26,7 @@
 
 #define DIYBMS_DEBUG
 
+// TODO - Enable CPU SPEED ERROR
 /*
   #if !(F_CPU == 8000000)
   #error Processor speed should be 8 Mhz internal

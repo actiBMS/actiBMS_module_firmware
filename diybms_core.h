@@ -102,7 +102,7 @@ struct config_t {
   // Enable Active Balancing
   uint8_t enable_balancing;
 
-    // Enable Active Balancing
+  // Enable Active Balancing
   uint8_t enable_balancing_onbypass;
 
   // Active Balancing Voltage Threshold (millivolt)
