@@ -24,8 +24,8 @@
   that legally restrict others from doing anything the license permits.
 */
 
-#ifndef _DIYBMS_PACKET_H
-#define _DIYBMS_PACKET_H
+#ifndef _DIYBMS_PACKET_COMPAT_H
+#define _DIYBMS_PACKET_COMPAT_H
 
 #include <PacketSerial.h>
 
@@ -33,38 +33,43 @@
 #include "diybms_core.h"
 #include "crc16.h"
 
-#define DATA_LEN_MAX 12
+#define DATA_LEN_MAX 16
 
-#define ADDRESS_BROADCAST 0x8000
-#define ADDRESS_MODULE 0x00FF
-#define ADDRESS_BANK 0x0F00
+#define ADDRESS_BROADCAST 0x80
+#define ADDRESS_MODULE 0x0F
+#define ADDRESS_BANK 0x70
 
 #define SEQUENCE_REPLY 0x80
 
 struct packet_t {
-  uint16_t address;
-  uint16_t sequence;
+  uint8_t address;
   uint8_t command;
-  uint8_t stats;
+  uint16_t sequence;
   uint16_t data[DATA_LEN_MAX];
   uint16_t crc;
 }  __attribute__((packed));
 
+typedef union
+{
+  float number;
+  uint8_t bytes[4];
+  uint16_t word[2];
+} FLOATUNION_t;
+
 enum COMMAND : uint8_t
 {
-  CMD_PING = 0x00,
-  CMD_IDENTIFY = 0x01,
-  CMD_VOLTAGE = 0x02,
+  CMD_BANK_IDENTITY_SET = 0x00,
+  CMD_VOLTAGE_STATUS = 0x01,
+  CMD_IDENTIFY = 0x02,
   CMD_TEMPERATURE = 0x03,
   CMD_BAD_PACKET = 0x04,
-  CMD_SETTINGS_READ = 0x06,
-  CMD_SETTINGS_WRITE = 0x07,
-  CMD_IDENTITY_SET = 0x08
+  CMD_SETTINGS_READ = 0x05,
+  CMD_SETTINGS_WRITE = 0x06
 };
 
-class PacketProcessor {
+class LegacyPacketProcessor {
   public:
-    PacketProcessor(DiyBMS * bms_core, BMSHal * hardware) {
+    LegacyPacketProcessor(DiyBMS * bms_core, BMSHal * hardware) {
       _hardware = hardware;
       _bms_core = bms_core;
 
@@ -72,7 +77,7 @@ class PacketProcessor {
       _module_address = _bms_core->_config.cell_id;
     }
 
-    ~PacketProcessor() {}
+    ~LegacyPacketProcessor() {}
 
     void processPacketFromSender(const PacketSerial_ < COBS, 0, 64 >& sender, const uint8_t* buffer, size_t size);
 
@@ -87,11 +92,16 @@ class PacketProcessor {
     volatile uint16_t _bad_packets = 0;
 
   private:
+    uint8_t _identify_module;
+
     bool isPacketForMe();
     bool processPacket();
 
     bool processConfigLoad();
     bool processConfigSave();
+
+    void incrementPacketAddress();
+    uint8_t temperatureToByte(float celcius);
 };
 
 #endif

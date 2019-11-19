@@ -275,7 +275,7 @@ void DiyBMS::adcAcquireData(uint8_t channel, bool more) {
   switch (channel) {
     case ADC_CAHNNEL::ADC_CELL_VOLTAGE:
       {
-        _cell_voltage = (raw_data * _config.volt_reference) + _config.volt_offset;
+        _cell_voltage = (raw_data * _config.volt_reference) * _config.volt_offset;
         break;
       }
     case ADC_CAHNNEL::ADC_INTERNAL_TEMP:

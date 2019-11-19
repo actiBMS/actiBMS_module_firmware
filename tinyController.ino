@@ -25,6 +25,7 @@
 */
 
 #define DIYBMS_DEBUG
+#define DIYBMS_OLD_PROTOCOL
 
 // TODO - Enable CPU SPEED ERROR
 /*
@@ -37,14 +38,24 @@
 
 #include "diybms_core.h"
 #include "diybms_arduino.h"
+
+#ifdef DIYBMS_OLD_PROTOCOL
+#include "packet_processor_cmp.h"
+#else
 #include "packet_processor.h"
+#endif
 
 // 48 byte buffer. It store up to two frames
-PacketSerial_<COBS, 0, 48> packetSerial;
+PacketSerial_<COBS, 0, 64> packetSerial;
 
 DiyBMSArduino hardware;
 DiyBMS bmsCore(&hardware);
+
+#ifdef DIYBMS_OLD_PROTOCOL
+LegacyPacketProcessor packetHandler(&bmsCore, &hardware);
+#else
 PacketProcessor packetHandler(&bmsCore, &hardware);
+#endif
 
 ISR(WDT_vect) {
   //This is the watchdog timer - something went wrong and no activity recieved in a while
@@ -88,6 +99,10 @@ void setup() {
     hardware.display(LED_FAULT);
     while (true);
   }
+
+
+         /*float current = (516 - rawcurr) * 45 / 1023;
+          Serial.println(current, 3);*/
 }
 
 void loop() {
@@ -96,7 +111,7 @@ void loop() {
   if (bmsCore.update()) {
     Serial.printf(F("We can sleep!\n"));
     Serial.println();
-    
+
     // Program stops here until woken by watchdog or pin change interrupt
     hardware.sleep();
 

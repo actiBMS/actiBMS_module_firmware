@@ -28,7 +28,7 @@
 
 
 //Run when a new packet is received over serial
-void PacketProcessor::processPacketFromSender(const PacketSerial_ < COBS, 0, 48 >& sender, const uint8_t* buffer, size_t size) {
+void PacketProcessor::processPacketFromSender(const PacketSerial_ < COBS, 0, 64 >& sender, const uint8_t* buffer, size_t size) {
 
   if (size == sizeof(packet_t)) {
     uint16_t calculated_crc;
@@ -47,10 +47,10 @@ void PacketProcessor::processPacketFromSender(const PacketSerial_ < COBS, 0, 48 
         // Set flag to indicate we processed packet
         _buffer.sequence |= SEQUENCE_REPLY;
 
+        // TODO - Set STATUS byte
+
         //Calculate new checksum over whole buffer
         _buffer.crc =  CRC16::CalculateArray((uint8_t*)&_buffer, sizeof(packet_t) - 2);
-
-        //_hardware.GreenLedOn();
 
         _hardware->enableSerialTX();
 
@@ -61,7 +61,7 @@ void PacketProcessor::processPacketFromSender(const PacketSerial_ < COBS, 0, 48 
         _hardware->disableSerialTX();
       }
 
-      //_hardware.GreenLedOff();
+      return;
     }
   }
 
