@@ -3,6 +3,8 @@ Version 5 of the diyBMS, this repository contains the sources or the firmware fo
 
 THIS IS A WIP VERSION, SO LAST MINUTE CHANGES COULD BE DONE!
 
+** NOTE: DEVELOPMENT WORK ON VERSION 5 IS NOT BEING UNDERTAKEN BY THE ORIGINAL AUTHOR - THIS IS A SEPERATE BRANCH! **
+
 Do it yourself battery management system for Lithium ion battery packs/cells
 
 If you are looking for version 4 of this project take a look here https://github.com/stuartpittaway/diyBMSv4
